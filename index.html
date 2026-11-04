@@ -266,12 +266,32 @@ function getKey() {
   return u || store.get('code', '');
 }
 
-async function fetchData(key, repo) {
+async function fetchLive(key, repo) {
   const url = API + '?key=' + encodeURIComponent(key) + (repo ? '&repo=' + encodeURIComponent(repo) : '');
-  const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) throw new Error('n8n answered ' + r.status);
-  const txt = await r.text(); let d = null; try { d = JSON.parse(txt); } catch (e) {}
-  if (!d || !d.totals) { const e = new Error('wrong code'); e.code = 'KEY'; throw e; }
-  return d;
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 10000);
+  try {
+    const r = await fetch(url, { cache: 'no-store', signal: ctl.signal });
+    if (!r.ok) return null;
+    const d = JSON.parse(await r.text());
+    return d && d.totals ? d : null;
+  } catch (e) { return null; } finally { clearTimeout(timer); }
+}
+
+async function openSnapshot(key) {
+  const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  const snap = await fetch('snapshot.json', { cache: 'no-store' }).then(r => r.json());
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(key), 'PBKDF2', false, ['deriveKey']);
+  const aes = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: b64(snap.salt), iterations: snap.iterations, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(snap.iv) }, aes, b64(snap.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+let SNAPSHOT = false;
+async function fetchData(key, repo) {
+  const live = await fetchLive(key, repo);
+  if (live) { SNAPSHOT = false; return live; }
+  try { const d = await openSnapshot(key); SNAPSHOT = true; return d; }
+  catch (e) { const err = new Error('wrong code'); err.code = 'KEY'; throw err; }
 }
 
 function showGate(msg) {
@@ -289,8 +309,13 @@ async function load(repo) {
     DATA = await fetchData(key, repo || store.get('repo', ''));
     document.body.classList.remove('locked');
     document.getElementById('gate').style.display = 'none';
-    document.getElementById('live').textContent = 'Live from n8n · ' + DATA.totals.entries + ' entries';
-    document.getElementById('updated').textContent = 'Updated ' + new Date(DATA.generated_at).toLocaleString('en-GB');
+    const when = new Date(DATA.generated_at);
+    document.getElementById('live').textContent = SNAPSHOT
+      ? 'Snapshot from ' + when.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' (n8n not reachable)'
+      : 'Live from n8n · ' + DATA.totals.entries + ' entries';
+    document.getElementById('live').parentElement.style.color = SNAPSHOT ? 'var(--warn)' : '';
+    document.getElementById('live').parentElement.style.background = SNAPSHOT ? 'var(--warn-soft)' : '';
+    document.getElementById('updated').textContent = (SNAPSHOT ? 'Data from ' : 'Updated ') + when.toLocaleString('en-GB');
     document.getElementById('est').value = store.get('est', '1200');
     document.getElementById('pstart').value = store.get('pstart', DATA.totals.first_date);
     document.getElementById('pend').value = store.get('pend', '2026-12-31');
