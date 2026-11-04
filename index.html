@@ -43,6 +43,8 @@ h1{font-size:26px;margin:0;letter-spacing:-.02em}
 .kpi.warn .val{color:var(--warn)}
 .chart{position:relative;height:280px}
 .chart.sm{height:240px}
+.chart.tall{height:400px}
+@media (max-width:860px){.chart.tall{height:280px}}
 table{width:100%;border-collapse:collapse;font-size:13.5px}
 th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line)}
 th{color:var(--muted);font-weight:500;font-size:12px}
@@ -66,6 +68,13 @@ button{font:inherit;font-size:13.5px;padding:8px 12px;border-radius:8px;border:0
 .muted{color:var(--muted)}
 .err{color:var(--warn);font-size:13px}
 footer{margin-top:24px;color:var(--muted);font-size:12px}
+.note-line{font-size:12.5px;color:var(--muted);margin:10px 0 0}
+.note-line a{color:var(--accent)}
+.finding{display:flex;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.finding:last-of-type{border-bottom:0}
+.finding b{display:block;margin-bottom:2px}
+.finding span{color:var(--muted)}
+.finding .fnum{flex:none;width:22px;height:22px;border-radius:50%;background:var(--warn-soft);color:var(--warn);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px}
 body.locked .wrap > section:not(#gate), body.locked footer{display:none}
 </style>
 </head>
@@ -91,11 +100,11 @@ body.locked .wrap > section:not(#gate), body.locked footer{display:none}
 
   <section class="grid two" style="margin-top:16px">
     <div class="card">
-      <h2>Timeline: hours logged</h2>
-      <p class="hint">Cumulative hours logged in Kimai per week.</p>
-      <div class="flag" style="margin-bottom:12px"><strong>Finding</strong><div><b>Progress cannot be measured from the data.</b> RiskMONITOR has no hours budget in Kimai, for either phase. The project started in May 2025, but the first Kimai entry is from 2 Feb 2026, so the history before that is missing and the hours shown are only part of the project.</div></div>
-      <div class="chart"><canvas id="cTimeline"></canvas></div>
-      <details id="assume" style="margin-top:12px">
+      <h2>Hours logged over time</h2>
+      <p class="hint">Cumulative hours per week, from the first Kimai entry (2 Feb 2026).</p>
+      <div class="chart tall"><canvas id="cTimeline"></canvas></div>
+      <p class="note-line">No hours budget exists in Kimai, so progress is not shown. See <a href="#findings">Findings</a>.</p>
+      <details id="assume" style="margin-top:8px">
         <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Compare with an assumed budget (an assumption, not data)</summary>
         <div class="controls" style="margin-top:10px">
           <label>Assumed total hours (A) <input id="est" type="number" min="1" step="10" placeholder="e.g. 2,000"></label>
@@ -106,14 +115,9 @@ body.locked .wrap > section:not(#gate), body.locked footer{display:none}
       </details>
     </div>
     <div class="card">
-      <div class="pill" style="background:var(--warn-soft);color:var(--warn);margin-bottom:8px">Integration demo - not RiskMONITOR data</div>
-      <h2>GitHub tasks via n8n</h2>
-      <p class="hint">Shows that n8n can read open and closed tasks (issues) from a GitHub repository. The tasks below are our own capstone tasks in our demo repository, not the RiskMONITOR backlog, which is not on GitHub.</p>
-      <div class="controls">
-        <label>Repository (owner/name) <input id="repo" class="wide" placeholder="ReleaseHaven/Dashboard-for-greencode"></label>
-        <button id="ghload">Load</button>
-      </div>
-      <div id="gh"><p class="muted">Loading...</p></div>
+      <h2 id="findings">Findings</h2>
+      <p class="hint">Calculated by rules in n8n, the same checks the monthly report runs before the project manager reviews it.</p>
+      <div id="flags"></div>
     </div>
   </section>
 
@@ -133,14 +137,17 @@ body.locked .wrap > section:not(#gate), body.locked footer{display:none}
   <section class="grid half" style="margin-top:16px">
     <div class="card">
       <h2>Hours per task</h2>
-      <p class="hint">Hours on entries whose description names a task code (RMON-xxx).</p>
-      <div class="flag" style="margin-bottom:12px"><strong>Finding</strong><div><b>Only <span id="taskShare"></span> of all hours can be linked to a task.</b> Kimai already has a custom field for an issue-tracker ID, but it is empty in all <span id="taskEntries"></span> entries; the tags are categories, not tasks. Recommendation: make the issue-tracker field mandatory.</div></div>
+      <p class="hint">Hours on entries whose description names a task code (RMON-xxx). Only <span id="taskShare"></span> of all hours have one.</p>
       <table id="tasks"><thead><tr><th>Task</th><th class="num">Hours</th><th class="num">Entries</th><th>First - last</th></tr></thead><tbody></tbody></table>
     </div>
     <div class="card">
-      <h2>Data quality checks</h2>
-      <p class="hint">Calculated by rules in n8n. These are the same checks the monthly report runs before the project manager reviews it.</p>
-      <div id="flags"></div>
+      <h2 style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">GitHub tasks via n8n <span class="pill" style="background:var(--warn-soft);color:var(--warn);font-size:11px">Demo - not RiskMONITOR data</span></h2>
+      <p class="hint">n8n reads open and closed issues from a GitHub repository. Shown with our own capstone tasks; the RiskMONITOR backlog is not on GitHub.</p>
+      <div class="controls">
+        <label>Repository (owner/name) <input id="repo" class="wide" placeholder="ReleaseHaven/Dashboard-for-greencode"></label>
+        <button id="ghload">Load</button>
+      </div>
+      <div id="gh"><p class="muted">Loading...</p></div>
     </div>
   </section>
 
@@ -241,19 +248,20 @@ function tasks() {
   DATA.tasks.forEach(t => tb.appendChild(el('tr', {}, '<td class="tag">' + t.task + '</td><td class="num">' + fmt(t.hours, 2).replace(/\.00$/, '') + '</td><td class="num">' + t.entries + '</td><td class="muted">' + t.first_date + ' - ' + t.last_date + '</td>')));
   if (!DATA.tasks.length) tb.appendChild(el('tr', {}, '<td colspan="4" class="muted">No task codes found in descriptions.</td>'));
   document.getElementById('taskShare').textContent = fmt(DATA.totals.hours_with_task_code, 0) + ' of ' + fmt(DATA.totals.hours, 0) + ' h (' + fmt(DATA.totals.hours_with_task_code / DATA.totals.hours * 100, 1) + '%)';
-  document.getElementById('taskEntries').textContent = DATA.totals.entries;
 }
 
 function flags() {
   const t = DATA.totals, f = document.getElementById('flags'); f.innerHTML = '';
   const gapMonths = DATA.months.filter(m => m.zero_revenue_entries > 0).map(m => m.month + ' (' + m.zero_revenue_entries + ')').join(', ');
+  const taskPct = fmt(t.hours_with_task_code / t.hours * 100, 1);
   const rows = [
-    [t.leave_entries_marked_billable > 0, 'Leave logged as billable', t.leave_entries_marked_billable + ' holiday, study or other leave entries (' + fmt(t.leave_hours_marked_billable, 1) + ' h) are logged as billable on the client project, and ' + usd(t.leave_revenue_usd) + ' of revenue is attached to them. Verify before invoicing.'],
-    [t.zero_revenue_entries > 0, 'Revenue 0 on billable work', t.zero_revenue_entries + ' entries, ' + fmt(t.zero_revenue_hours, 1) + ' h. By month: ' + gapMonths + '. A data gap until rates are loaded, not unbilled work.'],
-    [t.pct_entries_without_description > 30, 'Missing descriptions', fmt(t.pct_entries_without_description, 1) + '% of entries have no description, which limits what the report can say about the work.'],
-    [true, 'No hours budget and missing history', 'Kimai has no hours budget for RiskMONITOR, and entries before 2 Feb 2026 are missing (the project started in May 2025).'],
+    ['Leave logged as billable', t.leave_entries_marked_billable + ' leave entries (' + fmt(t.leave_hours_marked_billable, 1) + ' h) are billable on the client project, with ' + usd(t.leave_revenue_usd) + ' of revenue attached. Verify before invoicing.'],
+    ['Revenue 0 on billable work', t.zero_revenue_entries + ' entries (' + fmt(t.zero_revenue_hours, 1) + ' h): ' + gapMonths + '. A data gap until rates are loaded, not unbilled work.'],
+    ['Missing descriptions', fmt(t.pct_entries_without_description, 1) + '% of entries have no description.'],
+    ['Hours not linked to tasks', 'Only ' + taskPct + '% of hours carry a task code. Kimai has an issue-tracker field, but it is empty in all ' + t.entries + ' entries. Making it mandatory is a cheap fix.'],
+    ['No budget, partial history', 'Kimai has no hours budget for RiskMONITOR, and entries before 2 Feb 2026 are missing (the project started in May 2025).'],
   ];
-  rows.forEach(([bad, h, txt]) => f.appendChild(el('div', { className: 'flag' + (bad ? '' : ' okf') }, '<strong>' + (bad ? 'Check' : 'OK') + '</strong><div><b>' + h + '.</b> ' + txt + '</div>')));
+  rows.forEach(([h, txt], i) => f.appendChild(el('div', { className: 'finding' }, '<span class="fnum">' + (i + 1) + '</span><div><b>' + h + '</b><span>' + txt + '</span></div>')));
   const subs = DATA.sub_projects.map(s => s.name + ': ' + fmt(s.hours, 0) + ' h').join(' · ');
   f.appendChild(el('p', { className: 'muted', style: 'font-size:12.5px;margin:10px 0 0' }, 'Included Kimai projects: ' + subs));
 }
