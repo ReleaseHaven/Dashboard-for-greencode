@@ -79,14 +79,21 @@ footer{margin-top:24px;color:var(--muted);font-size:12px}
     <div class="sub" id="updated"></div>
   </header>
 
+  <section class="card" id="gate" style="display:none;max-width:460px">
+    <h2>Access code</h2>
+    <p class="hint">This dashboard shows client data, so the numbers load only with the access code from the team.</p>
+    <div class="controls" style="margin:0"><label>Code <input id="code" type="password" class="wide" autocomplete="off"></label><button id="codego">Open</button></div>
+    <p class="err" id="codeerr"></p>
+  </section>
+
   <section class="grid kpis" id="kpis"></section>
 
   <section class="grid two" style="margin-top:16px">
     <div class="card">
       <h2>Timeline: hours spent vs. estimated hours</h2>
-      <p class="hint">Cumulative logged hours per week against the estimate and an even-pace plan line. Set the estimate and the planned end date to match the client budget.</p>
+      <p class="hint">Cumulative logged hours per week against the estimate and an even-pace plan line. The client has not given us a budget yet, so 1,200 h and 31 Dec 2026 are our assumptions. Change them to the real budget.</p>
       <div class="controls">
-        <label>Estimated total hours <input id="est" type="number" min="1" step="10"></label>
+        <label>Estimated total hours (assumption, A) <input id="est" type="number" min="1" step="10"></label>
         <label>Planned start <input id="pstart" type="date"></label>
         <label>Planned end <input id="pend" type="date"></label>
       </div>
@@ -94,14 +101,13 @@ footer{margin-top:24px;color:var(--muted);font-size:12px}
       <div class="status" id="progress"></div>
     </div>
     <div class="card">
-      <h2>Tasks from GitHub</h2>
-      <p class="hint">Open and closed issues in the project repository. Works with any public repo, or a private one with a read-only token that stays in this browser.</p>
+      <h2>Tasks from GitHub (via n8n)</h2>
+      <p class="hint">n8n reads the issues of the project repository: each issue is a task, open or closed. Today this is our own capstone repository, because RiskMONITOR's backlog is not on a GitHub repository we can access.</p>
       <div class="controls">
-        <label>Repository (owner/name) <input id="repo" class="wide" placeholder="owner/repository"></label>
-        <label>Token (optional) <input id="ghtoken" type="password" class="wide" placeholder="only for private repos"></label>
+        <label>Repository (owner/name) <input id="repo" class="wide" placeholder="ReleaseHaven/Dashboard-for-greencode"></label>
         <button id="ghload">Load</button>
       </div>
-      <div id="gh"><p class="muted" style="font-size:13.5px">No repository connected yet. RiskMONITOR's backlog uses task codes like RMON-144 in Kimai descriptions, so hours per task are shown below from the time data.</p></div>
+      <div id="gh"><p class="muted">Loading...</p></div>
     </div>
   </section>
 
@@ -241,41 +247,62 @@ function flags() {
   f.appendChild(el('p', { className: 'muted', style: 'font-size:12.5px;margin:10px 0 0' }, 'Included Kimai projects: ' + subs));
 }
 
-async function github() {
-  const repo = document.getElementById('repo').value.trim(); const tok = document.getElementById('ghtoken').value.trim();
-  const box = document.getElementById('gh'); store.set('repo', repo);
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) { box.innerHTML = '<p class="err">Write the repository as owner/name.</p>'; return; }
-  box.innerHTML = '<p class="muted">Loading...</p>';
-  const h = { Accept: 'application/vnd.github+json' }; if (tok) h.Authorization = 'Bearer ' + tok;
-  try {
-    const q = s => fetch('https://api.github.com/search/issues?per_page=8&sort=updated&q=' + encodeURIComponent('repo:' + repo + ' is:issue is:' + s), { headers: h }).then(r => { if (!r.ok) throw new Error(r.status === 422 || r.status === 404 ? 'Repository not found or not public' : 'GitHub answered ' + r.status); return r.json(); });
-    const [o, c] = await Promise.all([q('open'), q('closed')]);
-    const total = o.total_count + c.total_count; const pct = total ? c.total_count / total * 100 : 0;
-    const list = [...o.items.map(i => [i, 'open']), ...c.items.slice(0, 4).map(i => [i, 'closed'])];
-    box.innerHTML = '<div class="status" style="margin-top:0"><div><b>' + o.total_count + '</b><span>open tasks</span></div><div><b>' + c.total_count + '</b><span>closed tasks</span></div><div><b>' + fmt(pct, 0) + '%</b><span>tasks closed</span><div class="bar"><i style="width:' + pct + '%;background:' + css('--ok') + '"></i></div></div></div>' +
-      '<table style="margin-top:12px"><tbody>' + list.map(([i, s]) => '<tr><td class="tag">#' + i.number + '</td><td><a href="' + i.html_url + '" target="_blank" rel="noopener" style="color:var(--ink)">' + i.title.replace(/</g, '&lt;') + '</a></td><td class="muted">' + s + '</td></tr>').join('') + '</tbody></table>';
-  } catch (e) { box.innerHTML = '<p class="err">' + e.message + '. Check the name, or add a token for a private repository.</p>'; }
+function github() {
+  const g = DATA && DATA.github; const box = document.getElementById('gh');
+  if (!g) { box.innerHTML = '<p class="muted">No GitHub data.</p>'; return; }
+  document.getElementById('repo').value = g.repo;
+  if (!g.ok) { box.innerHTML = '<p class="err">n8n could not read ' + g.repo + ' (' + (g.error || 'error') + '). Check that the repository exists and is public.</p>'; return; }
+  const total = g.open_count + g.closed_count; const pct = total ? g.closed_count / total * 100 : 0;
+  const row = (i, s) => '<tr><td class="tag">#' + i.number + '</td><td><a href="' + i.url + '" target="_blank" rel="noopener" style="color:var(--ink)">' + String(i.title).replace(/</g, '&lt;') + '</a></td><td class="muted">' + s + '</td></tr>';
+  box.innerHTML = '<div class="status" style="margin-top:0"><div><b>' + g.open_count + '</b><span>open tasks</span></div><div><b>' + g.closed_count + '</b><span>closed tasks</span></div><div><b>' + fmt(pct, 0) + '%</b><span>tasks closed</span><div class="bar"><i style="width:' + pct + '%;background:' + css('--ok') + '"></i></div></div></div>' +
+    '<table style="margin-top:12px"><tbody>' + g.open.slice(0, 6).map(i => row(i, 'open')).join('') + g.recently_closed.slice(0, 3).map(i => row(i, 'closed')).join('') + '</tbody></table>' +
+    '<p class="muted" style="font-size:12px;margin:8px 0 0">Source: github.com/' + g.repo + ' issues, read by n8n.</p>';
 }
 
-async function load() {
+function getKey() {
+  const u = new URLSearchParams(location.search).get('code');
+  if (u) { store.set('code', u); history.replaceState(null, '', location.pathname); }
+  return u || store.get('code', '');
+}
+
+async function fetchData(key, repo) {
+  const url = API + '?key=' + encodeURIComponent(key) + (repo ? '&repo=' + encodeURIComponent(repo) : '');
+  const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) throw new Error('n8n answered ' + r.status);
+  const txt = await r.text(); let d = null; try { d = JSON.parse(txt); } catch (e) {}
+  if (!d || !d.totals) { const e = new Error('wrong code'); e.code = 'KEY'; throw e; }
+  return d;
+}
+
+function showGate(msg) {
+  document.getElementById('gate').style.display = 'block';
+  document.getElementById('codeerr').textContent = msg || '';
+  document.getElementById('live').textContent = 'Locked';
+}
+
+async function load(repo) {
+  const key = getKey();
+  if (!key) { showGate(''); return; }
   try {
-    const r = await fetch(API, { cache: 'no-store' }); if (!r.ok) throw new Error('n8n answered ' + r.status);
-    DATA = await r.json();
+    document.getElementById('live').textContent = 'Loading live data from n8n...';
+    DATA = await fetchData(key, repo || store.get('repo', ''));
+    document.getElementById('gate').style.display = 'none';
     document.getElementById('live').textContent = 'Live from n8n · ' + DATA.totals.entries + ' entries';
     document.getElementById('updated').textContent = 'Updated ' + new Date(DATA.generated_at).toLocaleString('en-GB');
     document.getElementById('est').value = store.get('est', '1200');
     document.getElementById('pstart').value = store.get('pstart', DATA.totals.first_date);
     document.getElementById('pend').value = store.get('pend', '2026-12-31');
-    kpis(DATA.totals); timeline(); months(); acts(); tasks(); flags();
-    ['est', 'pstart', 'pend'].forEach(id => document.getElementById(id).addEventListener('change', timeline));
+    kpis(DATA.totals); timeline(); months(); acts(); tasks(); flags(); github();
   } catch (e) {
+    if (e.code === 'KEY') { store.set('code', ''); showGate('That code did not work.'); return; }
     document.getElementById('live').textContent = 'Could not reach n8n';
     document.getElementById('kpis').innerHTML = '<div class="card err">The data API did not answer (' + e.message + '). Check that the workflow "Team 4 - Dashboard data API" is published in n8n.</div>';
   }
-  document.getElementById('repo').value = store.get('repo', '');
-  document.getElementById('ghload').addEventListener('click', github);
-  if (document.getElementById('repo').value) github();
 }
+
+['est', 'pstart', 'pend'].forEach(id => document.getElementById(id).addEventListener('change', () => { if (DATA) timeline(); }));
+document.getElementById('codego').addEventListener('click', () => { store.set('code', document.getElementById('code').value.trim()); load(); });
+document.getElementById('code').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('codego').click(); });
+document.getElementById('ghload').addEventListener('click', () => { const r = document.getElementById('repo').value.trim(); store.set('repo', r); load(r); });
 load();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (DATA) { timeline(); months(); acts(); } });
 </script>
