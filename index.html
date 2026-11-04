@@ -66,6 +66,7 @@ button{font:inherit;font-size:13.5px;padding:8px 12px;border-radius:8px;border:0
 .muted{color:var(--muted)}
 .err{color:var(--warn);font-size:13px}
 footer{margin-top:24px;color:var(--muted);font-size:12px}
+body.locked .wrap > section:not(#gate), body.locked footer{display:none}
 </style>
 </head>
 <body>
@@ -274,6 +275,7 @@ async function fetchData(key, repo) {
 }
 
 function showGate(msg) {
+  document.body.classList.add('locked');
   document.getElementById('gate').style.display = 'block';
   document.getElementById('codeerr').textContent = msg || '';
   document.getElementById('live').textContent = 'Locked';
@@ -285,6 +287,7 @@ async function load(repo) {
   try {
     document.getElementById('live').textContent = 'Loading live data from n8n...';
     DATA = await fetchData(key, repo || store.get('repo', ''));
+    document.body.classList.remove('locked');
     document.getElementById('gate').style.display = 'none';
     document.getElementById('live').textContent = 'Live from n8n · ' + DATA.totals.entries + ' entries';
     document.getElementById('updated').textContent = 'Updated ' + new Date(DATA.generated_at).toLocaleString('en-GB');
