@@ -91,19 +91,24 @@ body.locked .wrap > section:not(#gate), body.locked footer{display:none}
 
   <section class="grid two" style="margin-top:16px">
     <div class="card">
-      <h2>Timeline: hours spent vs. estimated hours</h2>
-      <p class="hint">Cumulative logged hours per week against the estimate and an even-pace plan line. The client has not given us a budget yet, so 1,200 h and 31 Dec 2026 are our assumptions. Change them to the real budget.</p>
-      <div class="controls">
-        <label>Estimated total hours (assumption, A) <input id="est" type="number" min="1" step="10"></label>
-        <label>Planned start <input id="pstart" type="date"></label>
-        <label>Planned end <input id="pend" type="date"></label>
-      </div>
+      <h2>Timeline: hours logged</h2>
+      <p class="hint">Cumulative hours logged in Kimai per week.</p>
+      <div class="flag" style="margin-bottom:12px"><strong>Finding</strong><div><b>Progress cannot be measured from the data.</b> RiskMONITOR has no hours budget in Kimai, for either phase. The project started in May 2025, but the first Kimai entry is from 2 Feb 2026, so the history before that is missing and the hours shown are only part of the project.</div></div>
       <div class="chart"><canvas id="cTimeline"></canvas></div>
+      <details id="assume" style="margin-top:12px">
+        <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Compare with an assumed budget (an assumption, not data)</summary>
+        <div class="controls" style="margin-top:10px">
+          <label>Assumed total hours (A) <input id="est" type="number" min="1" step="10" placeholder="e.g. 2,000"></label>
+          <label>Assumed start <input id="pstart" type="date"></label>
+          <label>Assumed end <input id="pend" type="date"></label>
+        </div>
       <div class="status" id="progress"></div>
+      </details>
     </div>
     <div class="card">
-      <h2>Tasks from GitHub (via n8n)</h2>
-      <p class="hint">n8n reads the issues of the project repository: each issue is a task, open or closed. Today this is our own capstone repository, because RiskMONITOR's backlog is not on a GitHub repository we can access.</p>
+      <div class="pill" style="background:var(--warn-soft);color:var(--warn);margin-bottom:8px">Integration demo - not RiskMONITOR data</div>
+      <h2>GitHub tasks via n8n</h2>
+      <p class="hint">Shows that n8n can read open and closed tasks (issues) from a GitHub repository. The tasks below are our own capstone tasks in our demo repository, not the RiskMONITOR backlog, which is not on GitHub.</p>
       <div class="controls">
         <label>Repository (owner/name) <input id="repo" class="wide" placeholder="ReleaseHaven/Dashboard-for-greencode"></label>
         <button id="ghload">Load</button>
@@ -128,7 +133,8 @@ body.locked .wrap > section:not(#gate), body.locked footer{display:none}
   <section class="grid half" style="margin-top:16px">
     <div class="card">
       <h2>Hours per task</h2>
-      <p class="hint">Hours on entries whose description names a task code (RMON-xxx). Only <span id="taskShare"></span> of all hours carry a code, so this is a lower bound.</p>
+      <p class="hint">Hours on entries whose description names a task code (RMON-xxx).</p>
+      <div class="flag" style="margin-bottom:12px"><strong>Finding</strong><div><b>Only <span id="taskShare"></span> of all hours can be linked to a task.</b> Kimai already has a custom field for an issue-tracker ID, but it is empty in all <span id="taskEntries"></span> entries; the tags are categories, not tasks. Recommendation: make the issue-tracker field mandatory.</div></div>
       <table id="tasks"><thead><tr><th>Task</th><th class="num">Hours</th><th class="num">Entries</th><th>First - last</th></tr></thead><tbody></tbody></table>
     </div>
     <div class="card">
@@ -139,7 +145,7 @@ body.locked .wrap > section:not(#gate), body.locked footer{display:none}
   </section>
 
   <footer>
-    Data: Google Sheet "Team 4 - RiskMONITOR timesheets" (Kimai export, 2 Feb - 28 Oct 2026), read live by the n8n workflow "Team 4 - Dashboard data API". Estimates you type here are assumptions (A) until the client confirms them, and stay in this browser only.
+    Data: Google Sheet "Team 4 - RiskMONITOR timesheets" (Kimai export, 2 Feb - 28 Oct 2026), read live by the n8n workflow "Team 4 - Dashboard data API". An assumed budget typed on this page is an assumption (A), not data, and stays in this browser only.
   </footer>
 </div>
 
@@ -176,37 +182,39 @@ function draw(id, cfg) { if (charts[id]) charts[id].destroy(); charts[id] = new 
 
 function timeline() {
   const w = DATA.weeks; const est = Number(document.getElementById('est').value) || 0;
-  const ps = new Date(document.getElementById('pstart').value + 'T00:00:00');
-  const pe = new Date(document.getElementById('pend').value + 'T00:00:00');
-  store.set('est', est); store.set('pstart', document.getElementById('pstart').value); store.set('pend', document.getElementById('pend').value);
+  const psv = document.getElementById('pstart').value, pev = document.getElementById('pend').value;
+  store.set('est2', est || ''); store.set('pstart2', psv); store.set('pend2', pev);
+  const ps = new Date((psv || w[0].week_start) + 'T00:00:00');
+  const pe = new Date((pev || w[w.length - 1].week_start) + 'T00:00:00');
+  const useAssumption = est > 0 && psv && pev && pe > ps;
   const labels = [], actual = [], plan = [];
   const lastActual = new Date(w[w.length - 1].week_start + 'T00:00:00');
-  const endAxis = pe > lastActual ? pe : lastActual;
-  const start = new Date(Math.min(ps, new Date(w[0].week_start + 'T00:00:00')));
+  const endAxis = useAssumption && pe > lastActual ? pe : lastActual;
+  const start = new Date(Math.min(useAssumption ? ps : Infinity, new Date(w[0].week_start + 'T00:00:00')));
   const byWeek = Object.fromEntries(w.map(x => [x.week_start, x.cumulative_hours]));
   let cur = new Date(start); cur.setDate(cur.getDate() - ((cur.getDay() + 6) % 7)); let last = 0;
   const span = Math.max(1, (pe - ps));
   while (cur <= endAxis) {
     const k = cur.toISOString().slice(0, 10); labels.push(k);
     if (cur <= lastActual) { if (byWeek[k] !== undefined) last = byWeek[k]; actual.push(last); } else actual.push(null);
-    const f = Math.min(1, Math.max(0, (cur - ps) / span)); plan.push(est ? Math.round(est * f * 10) / 10 : null);
+    const f = Math.min(1, Math.max(0, (cur - ps) / span)); plan.push(useAssumption ? Math.round(est * f * 10) / 10 : null);
     cur.setDate(cur.getDate() + 7);
   }
-  draw('cTimeline', { type: 'line', data: { labels, datasets: [
-    { label: 'Hours spent (cumulative)', data: actual, borderColor: css('--c1'), backgroundColor: css('--accent-soft'), fill: true, pointRadius: 0, borderWidth: 2.5, tension: .15, order: 2 },
-    { label: 'Even-pace plan', data: plan, borderColor: css('--c6'), borderDash: [5, 4], pointRadius: 0, borderWidth: 1.5, order: 0 },
-    { label: 'Estimated total', data: labels.map(() => est || null), borderColor: css('--c5'), pointRadius: 0, borderWidth: 1.5 }
-  ] }, options: baseOpts({ scales: { x: { ticks: { color: css('--muted'), maxTicksLimit: 10, font: { size: 11 } }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: css('--muted') }, grid: { color: css('--line') } } } }) });
+  const sets = [{ label: 'Hours logged in Kimai (cumulative, from 2 Feb 2026)', data: actual, borderColor: css('--c1'), backgroundColor: css('--accent-soft'), fill: true, pointRadius: 0, borderWidth: 2.5, tension: .15, order: 2 }];
+  if (useAssumption) sets.push(
+    { label: 'Even pace to assumed budget (A)', data: plan, borderColor: css('--c6'), borderDash: [5, 4], pointRadius: 0, borderWidth: 1.5, order: 0 },
+    { label: 'Assumed budget (A, not data)', data: labels.map(() => est), borderColor: css('--c5'), borderDash: [2, 3], pointRadius: 0, borderWidth: 1.5, order: 0 });
+  draw('cTimeline', { type: 'line', data: { labels, datasets: sets }, options: baseOpts({ scales: { x: { ticks: { color: css('--muted'), maxTicksLimit: 10, font: { size: 11 } }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: css('--muted') }, grid: { color: css('--line') } } } }) });
 
+  const box = document.getElementById('progress');
+  if (!useAssumption) { box.innerHTML = '<p class="muted" style="font-size:12.5px;grid-column:1/-1;margin:0">Type an assumed budget and dates to compare. The result is an assumption, not a finding.</p>'; return; }
   const spent = DATA.totals.hours; const asOf = new Date(DATA.totals.last_date + 'T00:00:00');
-  const budgetPct = est ? spent / est * 100 : 0;
+  const budgetPct = spent / est * 100;
   const timePct = Math.min(100, Math.max(0, (asOf - ps) / span * 100));
-  const diff = budgetPct - timePct;
-  const verdict = !est ? 'Set an estimate' : Math.abs(diff) < 5 ? 'On pace' : diff > 0 ? 'Burning faster than plan' : 'Burning slower than plan';
-  document.getElementById('progress').innerHTML =
-    '<div><b>' + (est ? fmt(budgetPct, 0) + '%' : '-') + '</b><span>of estimated hours used (' + fmt(spent, 0) + ' / ' + fmt(est, 0) + ' h)</span><div class="bar"><i style="width:' + Math.min(100, budgetPct) + '%"></i></div></div>' +
-    '<div><b>' + fmt(timePct, 0) + '%</b><span>of planned time elapsed at last entry (' + DATA.totals.last_date + ')</span><div class="bar"><i style="width:' + timePct + '%;background:' + css('--c6') + '"></i></div></div>' +
-    '<div><b style="font-size:16px;margin-top:4px">' + verdict + '</b><span>' + (est ? 'Estimated progress uses hours spent as the proxy; ' + fmt(Math.max(0, est - spent), 0) + ' h left in the estimate.' : '') + '</span></div>';
+  box.innerHTML =
+    '<div><b>' + fmt(budgetPct, 0) + '%</b><span>of the assumed budget, counting only hours logged since Feb 2026</span><div class="bar"><i style="width:' + Math.min(100, budgetPct) + '%"></i></div></div>' +
+    '<div><b>' + fmt(timePct, 0) + '%</b><span>of the assumed period elapsed at the last entry (' + DATA.totals.last_date + ')</span><div class="bar"><i style="width:' + timePct + '%;background:' + css('--c6') + '"></i></div></div>' +
+    '<div><b style="font-size:15px;margin-top:4px">Assumption only</b><span>Not a result: there is no budget in Kimai and hours before Feb 2026 are missing.</span></div>';
 }
 
 function months() {
@@ -232,16 +240,18 @@ function tasks() {
   const tb = document.querySelector('#tasks tbody'); tb.innerHTML = '';
   DATA.tasks.forEach(t => tb.appendChild(el('tr', {}, '<td class="tag">' + t.task + '</td><td class="num">' + fmt(t.hours, 2).replace(/\.00$/, '') + '</td><td class="num">' + t.entries + '</td><td class="muted">' + t.first_date + ' - ' + t.last_date + '</td>')));
   if (!DATA.tasks.length) tb.appendChild(el('tr', {}, '<td colspan="4" class="muted">No task codes found in descriptions.</td>'));
-  document.getElementById('taskShare').textContent = fmt(DATA.totals.hours_with_task_code, 0) + ' h (' + fmt(DATA.totals.hours_with_task_code / DATA.totals.hours * 100, 1) + '%)';
+  document.getElementById('taskShare').textContent = fmt(DATA.totals.hours_with_task_code, 0) + ' of ' + fmt(DATA.totals.hours, 0) + ' h (' + fmt(DATA.totals.hours_with_task_code / DATA.totals.hours * 100, 1) + '%)';
+  document.getElementById('taskEntries').textContent = DATA.totals.entries;
 }
 
 function flags() {
   const t = DATA.totals, f = document.getElementById('flags'); f.innerHTML = '';
   const gapMonths = DATA.months.filter(m => m.zero_revenue_entries > 0).map(m => m.month + ' (' + m.zero_revenue_entries + ')').join(', ');
   const rows = [
-    [t.zero_revenue_entries > 0, 'Revenue 0 on billable work', t.zero_revenue_entries + ' entries, ' + fmt(t.zero_revenue_hours, 1) + ' h. By month: ' + gapMonths + '. A data gap until rates are loaded, not lost income.'],
-    [t.leave_entries_marked_billable > 0, 'Leave marked billable', t.leave_entries_marked_billable + ' entries (' + fmt(t.leave_hours_marked_billable, 1) + ' h); ' + usd(t.leave_revenue_usd) + ' of revenue is attached to leave entries. Verify before invoicing.'],
+    [t.leave_entries_marked_billable > 0, 'Leave logged as billable', t.leave_entries_marked_billable + ' holiday, study or other leave entries (' + fmt(t.leave_hours_marked_billable, 1) + ' h) are logged as billable on the client project, and ' + usd(t.leave_revenue_usd) + ' of revenue is attached to them. Verify before invoicing.'],
+    [t.zero_revenue_entries > 0, 'Revenue 0 on billable work', t.zero_revenue_entries + ' entries, ' + fmt(t.zero_revenue_hours, 1) + ' h. By month: ' + gapMonths + '. A data gap until rates are loaded, not unbilled work.'],
     [t.pct_entries_without_description > 30, 'Missing descriptions', fmt(t.pct_entries_without_description, 1) + '% of entries have no description, which limits what the report can say about the work.'],
+    [true, 'No hours budget and missing history', 'Kimai has no hours budget for RiskMONITOR, and entries before 2 Feb 2026 are missing (the project started in May 2025).'],
   ];
   rows.forEach(([bad, h, txt]) => f.appendChild(el('div', { className: 'flag' + (bad ? '' : ' okf') }, '<strong>' + (bad ? 'Check' : 'OK') + '</strong><div><b>' + h + '.</b> ' + txt + '</div>')));
   const subs = DATA.sub_projects.map(s => s.name + ': ' + fmt(s.hours, 0) + ' h').join(' · ');
@@ -316,9 +326,9 @@ async function load(repo) {
     document.getElementById('live').parentElement.style.color = SNAPSHOT ? 'var(--warn)' : '';
     document.getElementById('live').parentElement.style.background = SNAPSHOT ? 'var(--warn-soft)' : '';
     document.getElementById('updated').textContent = (SNAPSHOT ? 'Data from ' : 'Updated ') + when.toLocaleString('en-GB');
-    document.getElementById('est').value = store.get('est', '1200');
-    document.getElementById('pstart').value = store.get('pstart', DATA.totals.first_date);
-    document.getElementById('pend').value = store.get('pend', '2026-12-31');
+    document.getElementById('est').value = store.get('est2', '');
+    document.getElementById('pstart').value = store.get('pstart2', '');
+    document.getElementById('pend').value = store.get('pend2', '');
     kpis(DATA.totals); timeline(); months(); acts(); tasks(); flags(); github();
   } catch (e) {
     if (e.code === 'KEY') { store.set('code', ''); showGate('That code did not work.'); return; }
